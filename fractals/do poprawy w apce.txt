@@ -1,0 +1,4 @@
+do poprawy: 
+- w zależności od zooma generować odpowiednią ilość punktów aby nie dublować ich i poprawić ten sposób wydajność kodu
+- generowanie fraktala sierpinskiego od zewn do wewn - szybsze generowanie
+- dlaczego siatka przy przybliżeniu jest czasem kwadratowa a czasem prostokątna

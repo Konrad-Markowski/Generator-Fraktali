@@ -1,0 +1,120 @@
+Zidentyfikowane i naprawione problemy:
+1. Crash przy dużych zbiorach danych (5M+ punktów)
+Problem: Program wywalał się przy generowaniu 5 milionów punktów
+Rozwiązanie:
+Dodano limit 2M punktów dla stabilności
+Batchowanie konwersji numpy → listy w partiach po 500k punktów
+Zmniejsza zużycie pamięci i zapobiega crashom
+2. Wolna konwersja numpy arrays na listy
+Problem: Konwersja .tolist() dla 5M punktów blokowała program i zużywała dużo pamięci
+Rozwiązanie:
+Batchowanie konwersji — dla >1M punktów dzielimy na mniejsze partie (500k)
+Konwersja partiami zamiast całej tablicy naraz
+Mniejsze zapotrzebowanie na pamięć i bardziej responsywne GUI
+3. Brak informacji o postępie
+Problem: Program wyglądał na zawieszony podczas długich operacji
+Rozwiązanie:
+Dodano aktualizacje statusu w czasie rzeczywistym:
+"Generowanie X punktów..."
+"Konwertowanie danych..."
+"Tworzenie wykresu..."
+Użytkownik widzi postęp pracy
+4. Częściowe renderowanie punktów (nieprawidłowe kolory)
+Problem: Przy batchowaniu część punktów miała zły kolor, bo tworzono wiele scatter_series z różnymi tematami
+Rozwiązanie:
+Jeden scatter_series zamiast wielu
+Batchowanie tylko konwersji danych, nie renderowania
+Wszystkie punkty mają jednolity kolor
+5. Optymalizacja tematów DearPyGui
+Problem: Tworzenie setek tematów dla każdej kombinacji koloru/rozmiaru
+Rozwiązanie:
+Cache'owanie tematów — temat tworzony raz i ponownie używany
+Unikalny tag oparty na zaokrąglonych wartościach
+Sprawdzenie czy temat istnieje przed utworzeniem
+6. Deprecated API calls w DearPyGui
+Problem: Używanie przestarzałych funkcji (add_spacing, add_same_line)
+Rozwiązanie:
+Zastąpiono add_spacing → add_spacer()
+Zastąpiono add_same_line → group(horizontal=True)
+Aktualizacja do nowego API
+7. Błędne użycie osi w plotach
+Problem: lock_min/max=True przed dodaniem danych, fit_axis_data() z enumami zamiast tagów
+Rozwiązanie:
+Usunięto lock_min/max przed dodaniem danych
+Poprawiono fit_axis_data() — używanie tagów osi zamiast enumów
+8. Wizualizacja metody rekurencyjnej
+Problem: Punkty bez połączeń nie pokazywały struktury trójkątów
+Rozwiązanie:
+Zmiana z scatter_series na line_series
+Rysowanie konturów każdego trójkąta (linie łączące wierzchołki)
+Lepsze pokazanie struktury fraktala
+9. Walidacja danych przed przekazaniem do DPG
+Problem: Brak sprawdzania kształtu danych przed wyświetleniem
+Rozwiązanie:
+Dodano walidację kształtu tablic (ndim, shape)
+Obsługa różnych formatów danych (1D, 2D)
+Lepsze komunikaty błędów
+10. Optymalizacja tekstury Mandelbrota
+Rozwiązanie:
+Tekstura tworzona raz, potem tylko aktualizacja danych
+Unikanie wielokrotnego tworzenia tekstury
+11. Nieużywane funkcje w kodzie
+Problem: Funkcje get_custom_parameters() w barnsley_fern.py i mandelbrot() w mandelbrot_set.py były zdefiniowane ale nigdy nie używane
+Rozwiązanie:
+Usunięto get_custom_parameters() - była tylko aliasem do get_predefined_parameters()
+Usunięto mandelbrot() - kod był zduplikowany inline w mandelbrot_set() dla lepszej optymalizacji Numba
+Czystszy kod bez martwego kodu
+12. Duplikacja kodu - konwersja kolorów
+Problem: Kod normalizacji kolorów z formatu DPG do RGBA był powtórzony 4 razy w różnych miejscach
+Rozwiązanie:
+Utworzono funkcję pomocniczą normalize_color() która obsługuje oba formaty (float [0-1] i int [0-255])
+Wszystkie miejsca używają teraz tej samej funkcji
+Łatwiejsze utrzymanie i mniej błędów
+13. Duplikacja kodu - konwersja punktów na listy
+Problem: Logika konwersji numpy arrays na listy Python (z równoległym przetwarzaniem dla dużych zbiorów) była zduplikowana w 2 miejscach
+Rozwiązanie:
+Utworzono funkcję pomocniczą convert_points_to_lists() która centralizuje tę logikę
+Automatyczna aktualizacja statusu podczas konwersji
+Kod bardziej czytelny i łatwiejszy w utrzymaniu
+14. Duplikacja kodu - tworzenie tematów DearPyGui
+Problem: Kod tworzenia i przypisywania tematów dla scatter_series i line_series był powtórzony wielokrotnie
+Rozwiązanie:
+Utworzono funkcje pomocnicze create_scatter_theme() i create_line_theme()
+Centralizacja logiki cache'owania tematów
+Znaczne zmniejszenie duplikacji kodu (z ~15 linii do 1 wywołania funkcji)
+15. Błąd w funkcji update_barnsley_prob_sum
+Problem: Funkcja używała barnsley_prob_4 zamiast barnsley_prob_0, co powodowało nieprawidłowe wyświetlanie sumy prawdopodobieństw
+Rozwiązanie:
+Przywrócono oryginalne indeksy 1, 2, 3, 4 dla tagów prawdopodobieństw (zgodne z etykietami "Transformacja 1-4")
+Wszystkie miejsca używające tych tagów zostały zsynchronizowane (generate_and_plot, update_barnsley_prob_sum, reset_barnsley_defaults, update_controls)
+Suma prawdopodobieństw wyświetla się teraz poprawnie
+16. Walidacja prawdopodobieństw - przywracanie domyślnych wartości
+Problem: Jeśli użytkownik wprowadził wartość ujemną lub >1.0 dla prawdopodobieństwa, wartość była tylko ograniczana do 0.0 lub 1.0, co nie było intuicyjne
+Rozwiązanie:
+Dodano funkcję validate_barnsley_prob() która automatycznie przywraca domyślną wartość prawdopodobieństwa gdy użytkownik wprowadzi wartość poza zakresem 0-1
+Funkcja identyfikuje które prawdopodobieństwo zostało zmienione i przywraca odpowiednią domyślną wartość z get_predefined_parameters()
+Lepsze UX - użytkownik widzi od razu jaka była domyślna wartość zamiast 0.0 lub 1.0
+
+17. Podział monolitu GUI na moduły
+Problem: `main_gui.py` zawierał logikę, renderowanie i layout w jednym pliku (utrudnione utrzymanie).
+Rozwiązanie:
+- `constants.py` – tagi, rozmiary viewportu, stałe
+- `renderers.py` – konwersje, tematy, scatter/line, tekstury Mandelbrota
+- `controllers.py` – logika generowania, walidacje, budowanie kontrolek
+- `main_gui.py` – bootstrap i uruchomienie GUI
+Efekt: czytelniejsza struktura i łatwiejsze dalsze zmiany.
+
+18. Monolityczne generate_and_plot
+Problem: Jedna duża funkcja obsługiwała wszystkie fraktale, trudna do utrzymania i rozbudowy.
+Rozwiązanie:
+- Podział na dedykowane funkcje `_render_*` dla każdego fraktala.
+- Rejestr handlerów `_FRACTAL_HANDLERS` i prosty dispatcher.
+- Wspólne czyszczenie poprzedniego renderu i statusu.
+Efekt: prostsze dodawanie nowych fraktali i mniejsza złożoność.
+
+19. Raport kontrakcji Barnsleya ignorował prawdopodobieństwa użytkownika
+Problem: Walidacja kontrakcji była liczona na równych wagach 0.25, niezależnie od ustawień w GUI.
+Rozwiązanie:
+- Normalizacja prawdopodobieństw użytkownika i użycie ich w `CustomIFS`.
+- Raport kontrakcji bazuje na rzeczywistych wagach.
+Efekt: komunikaty i walidacja są spójne z parametrami wejściowymi.
