@@ -9,7 +9,7 @@ from constants import (
     VIEWPORT_HEIGHT,
     VIEWPORT_WIDTH,
 )
-from controllers import generate_and_plot, update_controls
+from controllers import cancel_generation, generate_and_plot, update_controls
 from mandelbrot_set import mandelbrot_set as mandelbrot_set_numba
 
 
@@ -17,10 +17,26 @@ def main_gui():
     dpg.create_context()
     dpg.create_viewport(title="Generator Fraktali", width=VIEWPORT_WIDTH, height=VIEWPORT_HEIGHT)
 
+    with dpg.font_registry():
+        font_paths = [
+            r"C:\Windows\Fonts\segoeui.ttf",
+            r"C:\Windows\Fonts\arial.ttf",
+        ]
+        default_font = None
+        for font_path in font_paths:
+            try:
+                default_font = dpg.add_font(font_path, 18)
+                break
+            except:
+                continue
+        
+        if default_font:
+            dpg.bind_font(default_font)
+
     with dpg.window(label="Glowne Okno", tag="main_window", no_title_bar=True, no_resize=False, no_move=True):
         with dpg.group(horizontal=True):
             with dpg.child_window(
-                width=400,
+                width=480,
                 border=False,
                 tag="left_panel",
                 autosize_x=False,
@@ -49,7 +65,8 @@ def main_gui():
                 update_controls(None, dpg.get_value("fractal_selector"))
 
                 dpg.add_separator()
-                dpg.add_button(label="Generuj Fraktal", callback=generate_and_plot, width=-1)
+                dpg.add_button(label="Generuj Fraktal", callback=generate_and_plot, width=-1, tag="generate_button")
+                dpg.add_button(label="Przerwij", callback=cancel_generation, width=-1, tag="cancel_button", show=False)
                 dpg.add_spacer(height=20)
                 dpg.add_text("Status:", tag=DPG_STATUS_TEXT)
 
@@ -63,17 +80,13 @@ def main_gui():
 
     dpg.set_primary_window("main_window", True)
 
-    generate_and_plot(None, None)
-
     dpg.start_dearpygui()
     dpg.destroy_context()
 
 
 if __name__ == "__main__":
-    print("Kompilacja JIT (Numba)...")
     params = get_predefined_parameters()
     barnsley_fern(10, params)
     mandelbrot_set_numba(-2, 1, -1.5, 1.5, 10, 10, 10)
-    print("Gotowe.")
     main_gui()
 

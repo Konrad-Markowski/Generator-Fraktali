@@ -1,3 +1,4 @@
+import threading
 import time
 import traceback
 
@@ -24,6 +25,21 @@ from renderers import (
 )
 from sierpinski_triangle import sierpinski_triangle_chaos_game, sierpinski_triangle_recursive
 
+# Event do anulowania generowania (prostsze niż flaga boolean)
+_generation_cancel_event = threading.Event()
+_generation_thread = None
+
+
+def cancel_generation(_sender, _app_data):
+    """Anuluje trwające generowanie fraktala."""
+    _generation_cancel_event.set()
+    dpg.set_value(DPG_STATUS_TEXT, "Przerywanie generowania...")
+
+    if dpg.does_item_exist("cancel_button"):
+        dpg.hide_item("cancel_button")
+    if dpg.does_item_exist("generate_button"):
+        dpg.show_item("generate_button")
+
 
 def render_contraction_report(group_tag, report_list, summary, is_ok):
     """Aktualizuje grupę z raportem kontrakcji (kolory: zielony/ czerwony)."""
@@ -33,11 +49,11 @@ def render_contraction_report(group_tag, report_list, summary, is_ok):
 
     for item in report_list:
         color = [0, 180, 0, 255] if item["is_ok"] else [220, 80, 80, 255]
-        dpg.add_text(item["text"], parent=group_tag, color=color, wrap=320)
+        dpg.add_text(item["text"], parent=group_tag, color=color, wrap=450)
 
     dpg.add_separator(parent=group_tag)
     summary_color = [0, 180, 0, 255] if is_ok else [220, 80, 80, 255]
-    dpg.add_text(summary, parent=group_tag, color=summary_color, wrap=320)
+    dpg.add_text(summary, parent=group_tag, color=summary_color, wrap=450)
 
 
 def _clear_previous_render():
@@ -55,12 +71,20 @@ def _normalize_probabilities(probabilities):
 
 
 def _render_mandelbrot():
+    if _generation_cancel_event.is_set():
+        return
+    
     xmin, xmax = -2.0, 1.0
     ymin, ymax = -1.5, 1.5
     max_iter = dpg.get_value("mandel_max_iter")
     width, height = 1000, 1000
 
     mandelbrot_img = mandelbrot_set_numba(xmin, xmax, ymin, ymax, width, height, max_iter)
+    
+    if _generation_cancel_event.is_set():
+        _clear_previous_render()
+        return
+    
     texture_data = create_mandelbrot_texture(mandelbrot_img, max_iter)
 
     if dpg.does_item_exist(DPG_TEXTURE_TAG):
@@ -122,11 +146,19 @@ def _read_barnsley_inputs():
 
 
 def _render_barnsley():
+    if _generation_cancel_event.is_set():
+        return
+    
     n_points, barnsley_params = _read_barnsley_inputs()
 
     barnsley_ifs = CustomIFS()
     for prob, t in zip(barnsley_params["probabilities"], barnsley_params["transforms"]):
         barnsley_ifs.add_transformation(t["a"], t["b"], t["c"], t["d"], t["e"], t["f"], probability=prob)
+    
+    if _generation_cancel_event.is_set():
+        _clear_previous_render()
+        return
+    
     barnsley_ok, barnsley_report, barnsley_summary = barnsley_ifs.check_contraction()
     render_contraction_report("barnsley_check_results_group", barnsley_report, barnsley_summary, barnsley_ok)
     if not barnsley_ok:
@@ -135,10 +167,18 @@ def _render_barnsley():
 
     dpg.set_value(DPG_STATUS_TEXT, f"Generowanie {n_points} punktow...")
     points = barnsley_fern(n_points, barnsley_params)
+    
+    if _generation_cancel_event.is_set():
+        _clear_previous_render()
+        return
+    
     _create_scatter_plot(points, n_points, "Paproc Barnsleya", "barnsley_color", "barnsley_size", "barnsley_theme")
 
 
 def _render_sierpinski_chaos():
+    if _generation_cancel_event.is_set():
+        return
+    
     n_points = dpg.get_value("sierpinski_chaos_points")
     if n_points > 2000000:
         dpg.set_value(DPG_STATUS_TEXT, f"Generowanie {n_points} punktow... (moze to chwile potrwac)")
@@ -146,6 +186,11 @@ def _render_sierpinski_chaos():
 
     dpg.set_value(DPG_STATUS_TEXT, f"Generowanie {n_points} punktow...")
     points = sierpinski_triangle_chaos_game(n_points)
+    
+    if _generation_cancel_event.is_set():
+        _clear_previous_render()
+        return
+    
     _create_scatter_plot(
         points,
         n_points,
@@ -157,11 +202,19 @@ def _render_sierpinski_chaos():
 
 
 def _render_koch():
+    if _generation_cancel_event.is_set():
+        return
+    
     order = dpg.get_value("koch_order")
     dpg.set_value(DPG_STATUS_TEXT, f"Generowanie platka Kocha (poziom {order})...")
 
     # Uzywamy domyslnej dlugosci boku w funkcji koch_snowflake_points
     points = koch_snowflake_points(order)
+    
+    if _generation_cancel_event.is_set():
+        _clear_previous_render()
+        return
+    
     if points.ndim != 2 or points.shape[1] != 2:
         raise ValueError(f"Nieprawidlowy ksztalt danych: {points.shape}, oczekiwano (n, 2)")
 
@@ -190,7 +243,16 @@ def _render_koch():
 
 def _render_sierpinski_recursive():
     n = dpg.get_value("sierpinski_n")
-    triangles = sierpinski_triangle_recursive(n)
+    
+    if _generation_cancel_event.is_set():
+        return
+    
+    dpg.set_value(DPG_STATUS_TEXT, f"Generowanie trojkatow (poziom {n})...")
+    triangles = sierpinski_triangle_recursive(n, lambda: _generation_cancel_event.is_set())
+    
+    if _generation_cancel_event.is_set() or triangles is None:
+        _clear_previous_render()
+        return
 
     dpg.add_plot(
         label=f"Trojkat Sierpinskiego - Rekurencja (Poziom {n})",
@@ -205,8 +267,12 @@ def _render_sierpinski_recursive():
 
     color = normalize_color(dpg.get_value("sierpinski_recursive_color"))
     line_width = dpg.get_value("sierpinski_recursive_size")
-
-    for triangle in triangles:
+    
+    for i, triangle in enumerate(triangles):
+        if _generation_cancel_event.is_set():
+            _clear_previous_render()
+            return
+        
         v0, v1, v2 = triangle[0], triangle[1], triangle[2]
         x_line = [v0[0], v1[0], v2[0], v0[0]]
         y_line = [v0[1], v1[1], v2[1], v0[1]]
@@ -219,6 +285,9 @@ def _render_sierpinski_recursive():
 
 
 def _render_custom_ifs():
+    if _generation_cancel_event.is_set():
+        return
+    
     n_points = dpg.get_value("custom_points")
     if n_points > 2000000:
         dpg.set_value(DPG_STATUS_TEXT, f"Generowanie {n_points} punktow... (moze to chwile potrwac)")
@@ -227,6 +296,10 @@ def _render_custom_ifs():
     dpg.set_value(DPG_STATUS_TEXT, f"Generowanie {n_points} punktow...")
 
     ifs = get_custom_ifs_from_gui()
+    
+    if _generation_cancel_event.is_set():
+        _clear_previous_render()
+        return
 
     is_contraction, report, summary = ifs.check_contraction()
     render_contraction_report("custom_check_results_group", report, summary, is_contraction)
@@ -235,6 +308,10 @@ def _render_custom_ifs():
         dpg.set_value(DPG_STATUS_TEXT, "Ostrzezenie: kontrakcja niespelniona – generuje mimo to...")
 
     points = ifs.generate(n_points)
+    
+    if _generation_cancel_event.is_set():
+        _clear_previous_render()
+        return
 
     if len(points) == 0:
         dpg.set_value(DPG_STATUS_TEXT, "Brak punktow (sprawdz parametry).")
@@ -261,26 +338,80 @@ _FRACTAL_HANDLERS = {
 }
 
 
-def generate_and_plot(_sender, _app_data):
-    start_time = time.time()
-    fractal_type = dpg.get_value("fractal_selector")
-
-    _clear_previous_render()
-    dpg.set_value(DPG_STATUS_TEXT, "Generowanie... Czekaj.")
-
+def _generate_in_thread(fractal_type, start_time):
+    """Funkcja wykonywana w osobnym wątku do generowania fraktala."""
     try:
         handler = _FRACTAL_HANDLERS.get(fractal_type)
         if handler is None:
             raise ValueError(f"Nieznany typ fraktala: {fractal_type}")
+        
+        if _generation_cancel_event.is_set():
+            dpg.set_value(DPG_STATUS_TEXT, "Generowanie anulowane.")
+            return
+        
         handler()
+        
+        if _generation_cancel_event.is_set():
+            dpg.set_value(DPG_STATUS_TEXT, "Generowanie anulowane.")
+            return
 
         elapsed = time.time() - start_time
         dpg.set_value(DPG_STATUS_TEXT, f"Wygenerowano w: {elapsed:.3f} s")
     except Exception as e:
-        error_msg = f"Blad Generowania: {e}"
-        dpg.set_value(DPG_STATUS_TEXT, error_msg)
-        print(f"Blad generowania: {e}")
-        traceback.print_exc()
+        if not _generation_cancel_event.is_set():
+            error_msg = f"Blad Generowania: {e}"
+            dpg.set_value(DPG_STATUS_TEXT, error_msg)
+            print(f"Blad generowania: {e}")
+            traceback.print_exc()
+    finally:
+        if dpg.does_item_exist("cancel_button"):
+            dpg.hide_item("cancel_button")
+        if dpg.does_item_exist("generate_button"):
+            dpg.show_item("generate_button")
+        _generation_cancel_event.clear()
+
+
+def generate_and_plot(_sender, _app_data):
+    global _generation_thread
+    
+    if _generation_thread is not None and _generation_thread.is_alive():
+        return
+    
+    _generation_cancel_event.clear()
+    
+    fractal_type = dpg.get_value("fractal_selector")
+    start_time = time.time()
+
+    _clear_previous_render()
+    dpg.set_value(DPG_STATUS_TEXT, "Generowanie... Czekaj.")
+    
+    if dpg.does_item_exist("cancel_button"):
+        dpg.show_item("cancel_button")
+    if dpg.does_item_exist("generate_button"):
+        dpg.hide_item("generate_button")
+
+    _generation_thread = threading.Thread(target=_generate_in_thread, args=(fractal_type, start_time), daemon=True)
+    _generation_thread.start()
+
+
+def validate_color_rgba(sender, app_data):
+    """Waliduje wartości RGBA - jeśli przekraczają 255, ustawia na 255. Jeśli < 0, ustawia na 0."""
+    try:
+        color = dpg.get_value(sender)
+        if color is None or not isinstance(color, (list, tuple)) or len(color) < 4:
+            return
+        
+        validated_color = [
+            max(0, min(255, int(round(float(color[0]))))),
+            max(0, min(255, int(round(float(color[1]))))),
+            max(0, min(255, int(round(float(color[2]))))),
+            max(0, min(255, int(round(float(color[3]))))),
+        ]
+        
+        if validated_color != list(color):
+            dpg.set_value(sender, validated_color)
+    except (ValueError, TypeError, IndexError):
+        pass
 
 
 def validate_barnsley_prob(sender, app_data):
@@ -370,12 +501,12 @@ def check_custom_contraction(_sender, _app_data):
     
     for item in report_list:
         color = [0, 255, 0, 255] if item["is_ok"] else [255, 100, 100, 255]
-        dpg.add_text(item["text"], parent=parent, color=color, wrap=300)
+        dpg.add_text(item["text"], parent=parent, color=color, wrap=420)
         
     dpg.add_separator(parent=parent)
     
     summary_color = [0, 255, 0, 255] if is_overall_contraction else [255, 100, 100, 255]
-    dpg.add_text(summary, parent=parent, color=summary_color, wrap=300)
+    dpg.add_text(summary, parent=parent, color=summary_color, wrap=420)
 
 
 def rebuild_custom_transforms_fields(_sender, _app_data):
@@ -421,16 +552,16 @@ def rebuild_custom_transforms_fields(_sender, _app_data):
                 
                 dpg.add_text("Macierz (a, b, c, d):")
                 with dpg.group(horizontal=True):
-                    dpg.add_input_float(default_value=t["a"], tag=f"custom_t{i}_a", width=70, step=0.1, label="a", format="%.2f")
-                    dpg.add_input_float(default_value=t["b"], tag=f"custom_t{i}_b", width=70, step=0.1, label="b", format="%.2f")
+                    dpg.add_input_float(default_value=t["a"], tag=f"custom_t{i}_a", width=120, step=0.1, label="a", format="%.2f")
+                    dpg.add_input_float(default_value=t["b"], tag=f"custom_t{i}_b", width=120, step=0.1, label="b", format="%.2f")
                 with dpg.group(horizontal=True):
-                    dpg.add_input_float(default_value=t["c"], tag=f"custom_t{i}_c", width=70, step=0.1, label="c", format="%.2f")
-                    dpg.add_input_float(default_value=t["d"], tag=f"custom_t{i}_d", width=70, step=0.1, label="d", format="%.2f")
+                    dpg.add_input_float(default_value=t["c"], tag=f"custom_t{i}_c", width=120, step=0.1, label="c", format="%.2f")
+                    dpg.add_input_float(default_value=t["d"], tag=f"custom_t{i}_d", width=120, step=0.1, label="d", format="%.2f")
                 
                 dpg.add_text("Przesuniecie (e, f):")
                 with dpg.group(horizontal=True):
-                    dpg.add_input_float(default_value=t["e"], tag=f"custom_t{i}_e", width=70, step=0.1, label="e", format="%.2f")
-                    dpg.add_input_float(default_value=t["f"], tag=f"custom_t{i}_f", width=70, step=0.1, label="f", format="%.2f")
+                    dpg.add_input_float(default_value=t["e"], tag=f"custom_t{i}_e", width=120, step=0.1, label="e", format="%.2f")
+                    dpg.add_input_float(default_value=t["f"], tag=f"custom_t{i}_f", width=120, step=0.1, label="f", format="%.2f")
                     
     except Exception as e:
         print(f"Blad budowania pol transformacji: {e}")
@@ -516,6 +647,7 @@ def update_controls(_sender, app_data):
             tag="barnsley_color",
             parent=DPG_CONTROL_GROUP,
             width=-1,
+            callback=validate_color_rgba,
         )
         dpg.add_slider_float(
             label="Rozmiar punktow",
@@ -544,6 +676,7 @@ def update_controls(_sender, app_data):
             tag="sierpinski_chaos_color",
             parent=DPG_CONTROL_GROUP,
             width=-1,
+            callback=validate_color_rgba,
         )
         dpg.add_slider_float(
             label="Rozmiar punktow",
@@ -572,6 +705,7 @@ def update_controls(_sender, app_data):
             tag="sierpinski_recursive_color",
             parent=DPG_CONTROL_GROUP,
             width=-1,
+            callback=validate_color_rgba,
         )
         dpg.add_slider_float(
             label="Rozmiar punktow",
@@ -600,6 +734,7 @@ def update_controls(_sender, app_data):
             tag="koch_color",
             parent=DPG_CONTROL_GROUP,
             width=-1,
+            callback=validate_color_rgba,
         )
         dpg.add_slider_float(
             label="Grubosc linii",
@@ -638,7 +773,7 @@ def update_controls(_sender, app_data):
         dpg.add_separator(parent=DPG_CONTROL_GROUP)
         dpg.add_text("Wizualizacja:", parent=DPG_CONTROL_GROUP)
         dpg.add_color_edit(label="Kolor punktow", default_value=[200, 0, 200, 255], tag="custom_color",
-                           parent=DPG_CONTROL_GROUP, width=-1)
+                           parent=DPG_CONTROL_GROUP, width=-1, callback=validate_color_rgba)
         dpg.add_slider_float(label="Rozmiar punktow", default_value=0.5, min_value=0.1, max_value=5.0,
                              tag="custom_size", parent=DPG_CONTROL_GROUP, width=-1)
 
