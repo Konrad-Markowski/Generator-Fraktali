@@ -85,8 +85,5 @@ def main_gui():
 
 
 if __name__ == "__main__":
-    params = get_predefined_parameters()
-    barnsley_fern(10, params)
-    mandelbrot_set_numba(-2, 1, -1.5, 1.5, 10, 10, 10)
     main_gui()
 
